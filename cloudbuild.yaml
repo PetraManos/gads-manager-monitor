@@ -8,31 +8,40 @@ steps:
         pip install -r requirements.txt pytest
         PYTHONPATH=. pytest -q
 
-  # 2) Build image
+  # 2) Build image with two tags: commit SHA and latest
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/manager-monitor:${_TAG}', '.']
+    args:
+      - build
+      - -t
+      - gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA
+      - -t
+      - gcr.io/$PROJECT_ID/manager-monitor:latest
+      - .
 
-  # 3) Push image (required so Cloud Run can pull it)
+  # 3) Push both tags
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/manager-monitor:${_TAG}']
+    args: ['push', 'gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/manager-monitor:latest']
 
-  # 4) Deploy to Cloud Run
+  # 4) Deploy the SHA-tagged image (immutable)
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - run
       - deploy
       - manager-monitor
-      - --image=gcr.io/$PROJECT_ID/manager-monitor:${_TAG}
+      - --image=gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA
       - --region=${_REGION}
       - --allow-unauthenticated
+      - --labels=commit=$SHORT_SHA,repo=$REPO_NAME
 
 substitutions:
-  _TAG: 'latest'
   _REGION: 'australia-southeast2'
 
-# Optional: push metadata for the image
+# Optional: publish image metadata to the build
 images:
-- gcr.io/$PROJECT_ID/manager-monitor:${_TAG}
+- gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA
+- gcr.io/$PROJECT_ID/manager-monitor:latest
 
 timeout: '1200s'
 

@@ -1,32 +1,34 @@
 from __future__ import annotations
-from typing import Any, Iterable, Iterator, List
 import re
 
-def norm(s: Any) -> str:
-    return str(s or "").lower().replace("\u00A0"," ").replace("\xa0"," ").strip()
+def norm(s: object) -> str:
+    """Lowercase, convert NBSP to space, strip."""
+    return str(s or "").lower().replace("\u00A0", " ").strip()
 
-def norm_collapse(s: Any) -> str:
-    return re.sub(r"\s+", " ", norm(s))
+def collapse_one_line(s: str) -> str:
+    """Collapse all whitespace to single spaces and trim."""
+    return re.sub(r"\s+", " ", s or "").strip()
 
-def make_key(client_name: str, code: str) -> str:
-    return f"{norm_collapse(client_name)}|{norm_collapse(code)}"
+def has_word(s: str, word: str) -> bool:
+    """Whole-word match (case-insensitive)."""
+    s_l = (s or "").lower()
+    w = re.escape((word or "").lower())
+    return re.search(rf"(^|\W){w}(?=$|\W)", s_l) is not None
 
-def has_word(text: str, word: str) -> bool:
-    rx = re.compile(r"\b" + re.escape(word) + r"\b", re.IGNORECASE)
-    return bool(rx.search(str(text or "")))
+# ---- added to satisfy core/__init__.py imports ----
+def norm_collapse(s: object) -> str:
+    """Normalize then collapse to a single line."""
+    return collapse_one_line(norm(s))
 
-def chunks(iterable: Iterable[Any], size: int) -> Iterator[List[Any]]:
-    assert size > 0
-    buf: List[Any] = []
-    for x in iterable:
-        buf.append(x)
-        if len(buf) >= size:
-            yield buf; buf = []
-    if buf: yield buf
+def make_key(*parts: object) -> str:
+    """Stable pipe-delimited key based on normalized, collapsed parts."""
+    return "|".join(norm_collapse(p) for p in parts)
+# ---------------------------------------------------
 
-def find_col_eq(headers: List[Any], name: str) -> int:
-    tgt = str(name).lower()
-    for i, h in enumerate(headers):
-        if str(h).lower() == tgt:
-            return i
-    return -1
+__all__ = [
+    "norm",
+    "collapse_one_line",
+    "has_word",
+    "norm_collapse",
+    "make_key",
+]

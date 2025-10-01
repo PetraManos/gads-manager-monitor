@@ -1,54 +1,75 @@
 from __future__ import annotations
-from typing import Any
-import re
+from decimal import Decimal
 
-def to_num(x: Any) -> float:
+def as_number(x: object) -> float | None:
+    """Best-effort numeric parser for strings with commas/percent signs."""
+    if x is None:
+        return None
+    s = str(x).strip()
+    if s == "":
+        return None
+    # Handle negatives like (1,234.56)
+    neg = False
+    if s.startswith("(") and s.endswith(")"):
+        neg = True
+        s = s[1:-1].strip()
+    # Strip currency symbols and spaces
+    s = s.replace("$", "").replace("€", "").replace("£", "").replace("AUD", "").replace("USD", "")
+    s = s.replace(",", "").strip()
+    # Strip trailing percent for generic parsing
+    if s.endswith("%"):
+        s = s[:-1].strip()
     try:
-        s = re.sub(",", "", str(x or "0"))
-        return float(s)
+        v = float(s)
+        return -v if neg else v
     except Exception:
-        return 0.0
+        return None
 
-def as_number(v: Any) -> float:
-    """Parse number or percent-like strings. Returns ratio (e.g. '5%' -> 0.05)."""
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v or "").strip()
-    if not s: return float("nan")
-    m = re.search(r"-?\d+(\.\d+)?", s)
-    if not m: return float("nan")
-    n = float(m.group(0))
-    if "%" in s: n /= 100.0
-    return n
+# Back-compat alias expected by core/__init__.py
+to_num = as_number
 
-def parse_money_cell(v: Any) -> float:
-    if isinstance(v, (int, float)):
-        return float(v) or 0.0
-    s = str(v or "").replace("$","").replace(",","").strip()
+def parse_money_cell(x: object) -> float | None:
+    """Parse currency-like strings to a float amount (None if not parseable)."""
+    return as_number(x)
+
+def parse_percent_cell(x: object) -> float | None:
+    """
+    Parse percent-like strings to numeric percent value (e.g., '12.5%' -> 12.5).
+    Returns None if not parseable.
+    """
+    if x is None:
+        return None
+    s = str(x).strip()
+    if s == "":
+        return None
+    neg = False
+    if s.startswith("(") and s.endswith(")"):
+        neg = True
+        s = s[1:-1].strip()
+    # Keep percent semantics: if '%' present, remove it; otherwise assume already a percent number
+    has_pct = s.endswith("%")
+    if has_pct:
+        s = s[:-1].strip()
+    s = s.replace("$", "").replace("€", "").replace("£", "").replace("AUD", "").replace("USD", "")
+    s = s.replace(",", "").strip()
     try:
-        return float(s)
+        v = float(s)
+        v = -v if neg else v
+        return v
     except Exception:
-        s2 = re.sub(r"[^0-9.\-]", "", s) or "0"
-        return float(s2)
+        return None
 
-def parse_percent_cell(v: Any) -> float:
-    """Return percent value (Apps Script behaviour: 0.5 -> 50)."""
-    if isinstance(v, (int, float)):
-        return v*100 if 0 < v < 1 else float(v)
-    s = str(v or "").strip()
-    if not s: return float("nan")
-    if s.endswith("%"): s = s[:-1]
+def to_currency(x: float | Decimal | int, symbol: str = "$", places: int = 2) -> str:
+    """Format a number as currency with thousands separators."""
     try:
-        n = float(s)
-        return n*100 if 0 < n < 1 else n
+        return f"{symbol}{float(x):,.{places}f}"
     except Exception:
-        return float("nan")
+        return f"{symbol}0.00"
 
-def to_currency(val: Any) -> float:
-    raw = str("" if val is None else val).strip()
-    if not raw: return 0.0
-    try:
-        n = float(raw)
-    except Exception:
-        n = float(re.sub(r"[^0-9.\-]", "", raw) or "0")
-    return n/1e6 if abs(n) >= 100000 else n
+__all__ = [
+    "as_number",
+    "to_num",
+    "parse_money_cell",
+    "parse_percent_cell",
+    "to_currency",
+]

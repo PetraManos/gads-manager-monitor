@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from routes_checks import router as checks_router
+from routes.checks_exec import router as checks_exec_router
 from routers.violations import violations_router, set_provider
 import os
 from google.ads.googleads.client import GoogleAdsClient
@@ -8,9 +9,10 @@ from importlib.metadata import version as _pkg_version
 from core.checks.base import list_codes, run_checks
 import core.checks.examples  # noqa: F401 ensure checks are registered
 
-
 app = FastAPI()
-    app.include_router(checks_router)
+
+app.include_router(checks_exec_router)
+app.include_router(checks_catalog_router)
 # Mount violations endpoints
 app.include_router(violations_router)
 

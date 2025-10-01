@@ -1,8 +1,8 @@
 from google.ads.googleads.errors import GoogleAdsException
-from ..registry import registry
-from ..base import BaseCheck, Result
+from ..base import Result, Check, register
 
-class HasCampaigns(BaseCheck):
+@register
+class HasCampaigns(Check):
     code = "has_campaigns"
     description = "Customer has at least one non-removed campaign."
 
@@ -10,10 +10,7 @@ class HasCampaigns(BaseCheck):
         q = "SELECT campaign.id FROM campaign WHERE campaign.status != 'REMOVED' LIMIT 1"
         try:
             it = provider.gaql(customer_id, q)
-            has_any = False
-            for _ in it:
-                has_any = True
-                break
+            has_any = any(True for _ in it)
             return Result(
                 ok=has_any,
                 summary="1+ campaign found" if has_any else "No campaigns",
@@ -29,6 +26,3 @@ class HasCampaigns(BaseCheck):
                 code=self.code,
                 customer_id=str(customer_id),
             )
-
-# register on import
-registry.register(HasCampaigns)

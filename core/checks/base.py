@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Optional
+from .registry import registry
 
 @dataclass
 class Result:
@@ -12,6 +13,14 @@ class Result:
 class BaseCheck:
     code: str = ""
     description: str = ""
-
-    def run(self, provider, customer_id: str) -> Result:
+    def run(self, provider, customer_id: str) -> 'Result':
         raise NotImplementedError
+
+# Back-compat aliases / helpers:
+Check = BaseCheck
+
+def register(check_cls):
+    return registry.register(check_cls)
+
+def list_codes():
+    return registry.list()

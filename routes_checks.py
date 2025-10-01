@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from core.gads import AdsProvider, make_client
 from core.checks.registry import registry
-
-# Import examples so they self-register
+# Import examples so they register on import
 from core.checks.examples import has_campaigns  # noqa: F401
 
 router = APIRouter(prefix="/checks", tags=["checks"])

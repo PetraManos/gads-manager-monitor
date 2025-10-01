@@ -8,8 +8,18 @@ violations_router = APIRouter(prefix="/violations", tags=["violations"])
 _provider = None
 
 def set_provider(p):
+    """Inject a Google Ads provider and propagate it to all registered checks."""
     global _provider
     _provider = p
+    # Propagate to any existing check instances so they reuse the provider.
+    try:
+        for code in registry.list():
+            chk = registry.get(code)
+            if hasattr(chk, "client"):
+                setattr(chk, "client", p)
+    except Exception:
+        # If registry isn't fully initialized yet, that's fine; route handlers will inject on-demand.
+        pass
 
 @violations_router.get("/checks")
 def list_checks():

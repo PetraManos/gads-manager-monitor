@@ -4,6 +4,9 @@ import os
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from importlib.metadata import version as _pkg_version
+from core.checks.base import list_codes, run_checks
+import core.checks.examples  # noqa: F401 ensure checks are registered
+
 
 app = FastAPI()
 # Mount violations endpoints
@@ -91,3 +94,24 @@ def core_selftest():
         "expected_label(PHRASE_ONLY)"     : expected_label("PHRASE_ONLY"),
     }
 
+
+from fastapi import Body
+# --- Checks API ---
+@app.get("/checks")
+def checks_catalog():
+    return {"checks": list_codes()}
+
+@app.post("/checks/run")
+def checks_run(
+    payload: dict = Body(..., example={
+        "customers": [],                       # optional; defaults to LOGIN_CUSTOMER_ID
+        "checks": ["no_enabled_campaigns"]     # which checks to run
+    })
+):
+    client = make_ads_client()
+    customers = payload.get("customers") or [os.environ["GOOGLE_ADS_LOGIN_CUSTOMER_ID"]]
+    codes = payload.get("checks")
+    out = []
+    for cid in customers:
+        out.extend(run_checks(client, str(cid), codes))
+    return {"count": len(out), "violations": out}

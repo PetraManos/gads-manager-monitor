@@ -3,7 +3,7 @@ from routers.violations import violations_router, set_provider
 import os
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
-from importlib.metadata import version as _pkg_version
+import pkg_resources
 
 app = FastAPI()
 # Mount violations endpoints
@@ -31,7 +31,7 @@ def ping():
 @app.get("/diag")
 def diag():
     return {
-        "google_ads_version": _pkg_version("google-ads"),
+        "google_ads_version": pkg_resources.get_distribution("google-ads").version,
         "login_customer_id": os.environ.get("GOOGLE_ADS_LOGIN_CUSTOMER_ID"),
         "has_dev_token": bool(os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN")),
         "has_refresh_token": bool(os.environ.get("GOOGLE_ADS_REFRESH_TOKEN")),

@@ -1,0 +1,351 @@
+diff --git a/core/googleads_adapter.py b/core/googleads_adapter.py
+new file mode 100644
+index 0000000..b18a1f2
+--- /dev/null
++++ b/core/googleads_adapter.py
+@@ -0,0 +1,33 @@
++from typing import Iterable, Protocol, Any
++
++class ClientProvider(Protocol):
++    """Abstracts Google Ads access. Real implementation wraps GoogleAdsClient."""
++    def execute_gaql(self, customer_id: str, query: str) -> Iterable[dict[str, Any]]:
++        ...
++
++class NotConfiguredProvider:
++    def execute_gaql(self, customer_id: str, query: str):  # pragma: no cover
++        raise RuntimeError("Google Ads client provider is not configured")
+diff --git a/core/text.py b/core/text.py
+new file mode 100644
+index 0000000..bf2f2fe
+--- /dev/null
++++ b/core/text.py
+@@ -0,0 +1,19 @@
++from __future__ import annotations
++import re
++
++def norm(s: object) -> str:
++    return str(s or "").lower().replace("\u00A0", " ").strip()
++
++def collapse_one_line(s: str) -> str:
++    return re.sub(r"\s+", " ", s or "").strip()
++
++def has_word(s: str, word: str) -> bool:
++    s_l = (s or "").lower()
++    w = re.escape((word or "").lower())
++    return re.search(rf"(^|\W){w}(?=$|\W)", s_l) is not None
+diff --git a/core/dates.py b/core/dates.py
+new file mode 100644
+index 0000000..9d9c2de
+--- /dev/null
++++ b/core/dates.py
+@@ -0,0 +1,48 @@
++from datetime import datetime, timedelta, timezone
++try:
++    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
++except Exception:
++    ZoneInfo = None  # type: ignore
++    class ZoneInfoNotFoundError(Exception): ...
++
++_DEF_FIXED_OFFSET = timezone(timedelta(hours=9, minutes=30))  # Adelaide fallback
++
++def _resolve_adelaide_tz():
++    try:
++        if ZoneInfo is not None:
++            return ZoneInfo("Australia/Adelaide")
++    except ZoneInfoNotFoundError:
++        pass
++    except Exception:
++        pass
++    return _DEF_FIXED_OFFSET
++
++_TZ = _resolve_adelaide_tz()
++
++def set_tz(tz: timezone) -> None:
++    global _TZ
++    _TZ = tz
++
++def now_tz() -> datetime:
++    return datetime.now(tz=_TZ)
++
++def ymd(dt: datetime | None = None) -> str:
++    dt = dt or now_tz()
++    return dt.strftime("%Y-%m-%d")
++
++def range_last_n_days(n: int) -> tuple[str, str]:
++    end = now_tz().date()
++    start = end - timedelta(days=n)
++    return (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+diff --git a/core/numeric.py b/core/numeric.py
+new file mode 100644
+index 0000000..8ad3b2a
+--- /dev/null
++++ b/core/numeric.py
+@@ -0,0 +1,17 @@
++from decimal import Decimal
++
++def as_number(x: object) -> float | None:
++    if x is None:
++        return None
++    try:
++        return float(str(x).replace(",", "").replace("%", ""))
++    except Exception:
++        return None
++
++def to_currency(x: float | Decimal | int, symbol: str = "$", places: int = 2) -> str:
++    try:
++        return f"{symbol}{float(x):,.{places}f}"
++    except Exception:
++        return f"{symbol}0.00"
+diff --git a/core/names.py b/core/names.py
+new file mode 100644
+index 0000000..e1e51c1
+--- /dev/null
++++ b/core/names.py
+@@ -0,0 +1,23 @@
++from enum import Enum
++from core.text import norm
++
++class MatchType(str, Enum):
++    BROAD = "BROAD"
++    PHRASE = "PHRASE"
++    EXACT = "EXACT"
++
++_BRAND_TOKENS = {"brand", "branded"}
++
++def has_match_type_token(name: str) -> bool:
++    n = norm(name)
++    return any(t in n for t in ("[broad]", "[phrase]", "[exact]"))
++
++def is_branded_search_name(name: str) -> bool:
++    n = norm(name)
++    return any(tok in n for tok in _BRAND_TOKENS)
++
++def is_dynamic_search(name: str) -> bool:
++    n = norm(name)
++    return "dsa" in n or "dynamic search" in n
+diff --git a/core/runlog.py b/core/runlog.py
+new file mode 100644
+index 0000000..31c9b6d
+--- /dev/null
++++ b/core/runlog.py
+@@ -0,0 +1,28 @@
++from dataclasses import dataclass
++from typing import Any, Callable
++from core.text import collapse_one_line
++
++@dataclass
++class RunLogCtx:
++    customer_id: str
++    check: str
++    message: str
++    extras: dict[str, Any] | None = None
++
++    def one_line(self) -> str:
++        base = f"[{self.check}] {collapse_one_line(self.message)}"
++        if self.extras:
++            return base + " " + collapse_one_line(str(self.extras))
++        return base
++
++class RunLogger:
++    def __init__(self, writer: Callable[[RunLogCtx], None]):
++        self._writer = writer
++    def write(self, ctx: RunLogCtx) -> None:
++        self._writer(ctx)
++
++stdout_logger = RunLogger(lambda ctx: print(ctx.one_line()))
+diff --git a/core/waivers.py b/core/waivers.py
+new file mode 100644
+index 0000000..2f4e30f
+--- /dev/null
++++ b/core/waivers.py
+@@ -0,0 +1,28 @@
++from enum import Enum
++from dataclasses import dataclass
++
++class WaiverStatus(str, Enum):
++    NONE = "NONE"
++    ACTIVE = "ACTIVE"
++    EXPIRED = "EXPIRED"
++
++@dataclass
++class WaiverKey:
++    client: str
++    code: str
++
++@dataclass
++class Waiver:
++    key: WaiverKey
++    status: WaiverStatus
++    notes: str | None = None
++
++class WaiverIndex:
++    def __init__(self):
++        self._data: dict[tuple[str, str], Waiver] = {}
++    def get(self, client: str, code: str) -> Waiver | None:
++        return self._data.get((client, code))
++    def upsert(self, waiver: Waiver) -> None:
++        self._data[(waiver.key.client, waiver.key.code)] = waiver
++    def status_for(self, client: str, code: str) -> WaiverStatus:
++        w = self.get(client, code); return w.status if w else WaiverStatus.NONE
+diff --git a/core/violations/base.py b/core/violations/base.py
+new file mode 100644
+index 0000000..f7e6f68
+--- /dev/null
++++ b/core/violations/base.py
+@@ -0,0 +1,22 @@
++from dataclasses import dataclass
++from typing import Protocol, Any
++
++@dataclass
++class ViolationResult:
++    violated: bool
++    details: dict[str, Any] | None = None
++
++class AccountCheck(Protocol):
++    code: str
++    description: str
++    def run(self, customer_id: str, **params) -> ViolationResult: ...
++
++class EntityCheck(Protocol):
++    code: str
++    description: str
++    def run(self, customer_id: str, entity_id: str, **params) -> ViolationResult: ...
+diff --git a/core/violations/registry.py b/core/violations/registry.py
+new file mode 100644
+index 0000000..b4fae2a
+--- /dev/null
++++ b/core/violations/registry.py
+@@ -0,0 +1,26 @@
++from typing import Dict
++from core.violations.base import AccountCheck
++
++class Registry:
++    def __init__(self):
++        self._checks: Dict[str, AccountCheck] = {}
++    def register(self, check: AccountCheck) -> None:
++        key = check.code
++        if key in self._checks:
++            raise ValueError(f"Duplicate violation code: {key}")
++        self._checks[key] = check
++    def list(self) -> list[str]:
++        return sorted(self._checks.keys())
++    def get(self, code: str) -> AccountCheck:
++        return self._checks[code]
++
++registry = Registry()
++
++def register(check: AccountCheck) -> AccountCheck:
++    registry.register(check)
++    return check
+diff --git a/core/violations/examples/no_recent_impressions.py b/core/violations/examples/no_recent_impressions.py
+new file mode 100644
+index 0000000..f1d1a64
+--- /dev/null
++++ b/core/violations/examples/no_recent_impressions.py
+@@ -0,0 +1,52 @@
++from dataclasses import dataclass
++from typing import Any, Iterable
++from core.violations.base import ViolationResult
++from core.violations.registry import register
++
++@dataclass
++class NoRecentImpressions:
++    code: str = "no_recent_impressions_14d"
++    description: str = "Enabled campaigns with zero impressions in the last 14 days"
++    days: int = 14
++    client: Any | None = None  # expects an object with execute_gaql()
++
++    def _build_gaql(self, days: int) -> str:
++        return f"""
++          SELECT campaign.id, campaign.name, metrics.impressions
++          FROM campaign
++          WHERE campaign.status = 'ENABLED'
++            AND segments.date DURING LAST_{days}_DAYS
++          """.strip()
++
++    def _rows_with_zero_impr(self, rows: Iterable[dict]) -> list[dict]:
++        out: list[dict] = []
++        for r in rows:
++            impr = r.get("impressions")
++            try:
++                impr_f = float(impr)
++            except Exception:
++                impr_f = 0.0 if impr in (None, "", 0) else 1.0
++            if impr_f == 0.0:
++                out.append({
++                    "campaign_id": r.get("campaign_id") or r.get("campaign.id"),
++                    "campaign_name": r.get("campaign_name") or r.get("campaign.name"),
++                    "impressions": 0
++                })
++        return out
++
++    def run(self, customer_id: str, **params) -> ViolationResult:
++        days = int(params.get("days", self.days))
++        gaql = self._build_gaql(days)
++
++        entities: list[dict] = []
++        if self.client and hasattr(self.client, "execute_gaql"):
++            try:
++                rows = list(self.client.execute_gaql(customer_id, gaql))
++                entities = self._rows_with_zero_impr(rows)
++            except Exception as e:
++                return ViolationResult(False, {"entities": [], "meta": {"checked_days": days, "gaql": gaql, "adapter_error": str(e)}})
++        violated = len(entities) > 0
++        return ViolationResult(violated, {"entities": entities, "meta": {"checked_days": days, "gaql": gaql}})
++
++register(NoRecentImpressions())
+diff --git a/core/violations/examples/disapproved_ads.py b/core/violations/examples/disapproved_ads.py
+new file mode 100644
+index 0000000..da4a3f0
+--- /dev/null
++++ b/core/violations/examples/disapproved_ads.py
+@@ -0,0 +1,17 @@
++from dataclasses import dataclass
++from core.violations.base import ViolationResult
++from core.violations.registry import register
++
++@dataclass
++class DisapprovedAds:
++    code: str = "disapproved_ads_present"
++    description: str = "Any ENABLED ad group contains disapproved ads"
++    client: object | None = None
++
++    def run(self, customer_id: str, **params) -> ViolationResult:
++        # Placeholder GAQL; implement real logic in next step
++        return ViolationResult(False, {"entities": [], "meta": {}})
++
++register(DisapprovedAds())
+diff --git a/routers/violations.py b/routers/violations.py
+new file mode 100644
+index 0000000..e3c9e3a
+--- /dev/null
++++ b/routers/violations.py
+@@ -0,0 +1,33 @@
++from fastapi import APIRouter, HTTPException
++from core.violations.registry import registry
++# Import checks so they self-register
++from core.violations.examples.no_recent_impressions import NoRecentImpressions  # noqa: F401
++from core.violations.examples.disapproved_ads import DisapprovedAds  # noqa: F401
++
++violations_router = APIRouter(prefix="/violations", tags=["violations"])
++_provider = None
++
++def set_provider(p):
++    global _provider
++    _provider = p
++
++@violations_router.get("/checks")
++def list_checks():
++    return registry.list()
++
++@violations_router.get("/run")
++def run_check(customer_id: str, check: str, days: int | None = None):
++    try:
++        c = registry.get(check)
++    except KeyError:
++        raise HTTPException(status_code=404, detail=f"Unknown check: {check}")
++    if hasattr(c, "client") and _provider is not None:
++        setattr(c, "client", _provider)
++    params = {"days": days} if days is not None else {}
++    result = c.run(customer_id, **params)
++    return {"violated": result.violated, "details": result.details}

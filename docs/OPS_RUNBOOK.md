@@ -1,4 +1,5 @@
 # Manager Monitor — Runbook
+The purpose of this app is to automatically monitor Google Ads accounts.
 
 ## Overview
 Containerised Python/FastAPI app on Cloud Run for replacing Apps Script process violations, with Google Ads API access.

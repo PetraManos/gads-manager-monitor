@@ -1,66 +1,87 @@
-from __future__ import annotations
-from enum import Enum
-from core.text import norm
+import re
+from typing import Optional
 
-class MatchType(str, Enum):
-    BROAD = "BROAD"
-    PHRASE = "PHRASE"
-    EXACT = "EXACT"
+# --- helpers -----------------------------------------------------------------
 
-# canonical tokens used in names
-_TOKEN_TO_TYPE = {
-    "[broad]": MatchType.BROAD,
-    "[phrase]": MatchType.PHRASE,
-    "[exact]": MatchType.EXACT,
-}
-_TYPE_TO_TOKEN = {v: k for k, v in _TOKEN_TO_TYPE.items()}
+def _norm(s: str) -> str:
+    """Lowercase, normalize NBSPs, collapse whitespace."""
+    t = (s or "").replace("\xa0", " ").replace("\u00a0", " ").lower()
+    return " ".join(t.split())
 
-_BRAND_TOKENS = {"brand", "branded"}
+def _tokens(s: str) -> set[str]:
+    """Word tokens (letters only) after normalizing common separators."""
+    s = _norm(s)
+    # Turn separators into spaces so "Brand - Phrase", "Phrase/Exact" tokenize well
+    s = re.sub(r"[-_/+&]", " ", s)
+    return set(re.findall(r"[a-z]+", s))
+
+# --- public API ---------------------------------------------------------------
 
 def has_match_type_token(name: str) -> bool:
-    n = norm(name)
-    return any(tok in n for tok in _TOKEN_TO_TYPE.keys())
+    """True if the string mentions phrase/exact/broad (or P/E shorthand)."""
+    n = _norm(name)
+    toks = _tokens(n)
+    if {"phrase", "exact"} & toks or "broad" in toks:
+        return True
+    # Allow shorthand like "p/e" or "e/p"
+    if re.search(r"\bp\s*/\s*e\b|\be\s*/\s*p\b", n):
+        return True
+    return False
 
-def declared_type(name: str) -> MatchType | None:
+def declared_type(name: str) -> Optional[str]:
     """
-    Infer declared match type from a conventional token in the name, e.g.:
-      "[broad] shoes"  -> MatchType.BROAD
-      "[phrase] hats"  -> MatchType.PHRASE
-      "[exact] 'widgets'" -> MatchType.EXACT
-    Returns None if no token is present.
+    Map a human label to an internal declared type:
+      - 'Brand - Phrase' -> 'PHRASE_ONLY'
+      - 'Brand - Exact'  -> 'EXACT_ONLY'
+      - 'Brand - Broad'  -> 'BROAD_ONLY'
+      - 'P/E' or 'Phrase & Exact' -> 'PHRASE_AND_EXACT'
+      - otherwise -> None
     """
-    n = norm(name)
-    for tok, mtype in _TOKEN_TO_TYPE.items():
-        if tok in n:
-            return mtype
+    n = _norm(name)
+    toks = _tokens(n)
+
+    # Shorthand like "p/e" or "e/p"
+    if re.search(r"\bp\s*/\s*e\b|\be\s*/\s*p\b", n) or ({"phrase", "exact"} <= toks):
+        return "PHRASE_AND_EXACT"
+
+    if "phrase" in toks:
+        return "PHRASE_ONLY"
+    if "exact" in toks:
+        return "EXACT_ONLY"
+    if "broad" in toks:
+        return "BROAD_ONLY"
+
     return None
 
-def expected_label(name: str) -> str | None:
+def expected_label(declared: Optional[str]) -> str:
     """
-    Return the expected label token (e.g., "[broad]") based on declared_type(name).
-    Returns None if no declared type is found.
+    Human-facing label for a declared type, used in UI/reports/tests.
     """
-    mtype = declared_type(name)
-    return _TYPE_TO_TOKEN.get(mtype) if mtype else None
+    mapping = {
+        "PHRASE_ONLY": "PHRASE",
+        "EXACT_ONLY": "EXACT",
+        "BROAD_ONLY": "BROAD",
+        "PHRASE_AND_EXACT": "PHRASE or EXACT",
+    }
+    return mapping.get(declared or "", "")
+
+def is_dynamic_search_name(name: str) -> bool:
+    """
+    True if the name indicates Dynamic Search (e.g., contains 'dynamic' or 'dsa').
+    """
+    toks = _tokens(name)
+    return "dynamic" in toks or "dsa" in toks or "dynamicsearch" in toks
 
 def is_branded_search_name(name: str) -> bool:
-    n = norm(name)
-    return any(tok in n for tok in _BRAND_TOKENS)
-
-def is_dynamic_search(name: str) -> bool:
-    n = norm(name)
-    return "dsa" in n or "dynamic search" in n
-
-# Alias to satisfy core/__init__.py import
-def is_dynamic_search_name(name: str) -> bool:
-    return is_dynamic_search(name)
+    """
+    True if the name looks like a branded segment (contains 'brand' token).
+    """
+    return "brand" in _tokens(name)
 
 __all__ = [
-    "MatchType",
     "has_match_type_token",
     "declared_type",
     "expected_label",
-    "is_branded_search_name",
-    "is_dynamic_search",
     "is_dynamic_search_name",
+    "is_branded_search_name",
 ]

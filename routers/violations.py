@@ -11,14 +11,14 @@ def set_provider(p):
     """Inject a Google Ads provider and propagate it to all registered checks."""
     global _provider
     _provider = p
-    # propagate to existing check instances (avoid poking at private dict directly)
+    # Propagate to any existing check instances so they reuse the provider.
     try:
         for code in registry.list():
             chk = registry.get(code)
             if hasattr(chk, "client"):
                 setattr(chk, "client", p)
     except Exception:
-        # keep silent; router path will still inject on-demand
+        # If registry isn't fully initialized yet, that's fine; route handlers will inject on-demand.
         pass
 
 @violations_router.get("/checks")

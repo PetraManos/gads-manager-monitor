@@ -8,42 +8,58 @@ steps:
         pip install -r requirements.txt pytest
         PYTHONPATH=. pytest -q
 
-  # 2) Build image with two tags: commit SHA and latest
-  - name: 'gcr.io/cloud-builders/docker'
+  # Compute dest image names (region-AR host)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'set vars'
+    entrypoint: bash
     args:
-      - build
-      - -t
-      - gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA
-      - -t
-      - gcr.io/$PROJECT_ID/manager-monitor:latest
-      - .
+      - -lc
+      - |
+        echo "AR_HOST=${_REGION}-docker.pkg.dev" >> $$
+        echo "DEST_SHA=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:${SHORT_SHA}" >> $$
+        echo "DEST_LATEST=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:latest" >> $$
+        cat $$ > /workspace/vars.env
+    env:
+      - 'CLOUDSDK_CORE_DISABLE_PROMPTS=1'
+
+  # 2) Build image (two tags: SHA + latest)
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        source /workspace/vars.env
+        docker build -t "${DEST_SHA}" -t "${DEST_LATEST}" .
 
   # 3) Push both tags
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA']
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/manager-monitor:latest']
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        source /workspace/vars.env
+        docker push "${DEST_SHA}"
+        docker push "${DEST_LATEST}"
 
-  # 4) Deploy the SHA-tagged image (immutable)
+  # 4) Deploy SHA tag to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - run
       - deploy
       - manager-monitor
-      - --image=gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:${SHORT_SHA}
       - --region=${_REGION}
       - --allow-unauthenticated
-      - --labels=commit=$SHORT_SHA,repo=$REPO_NAME
+      - --labels=commit=${SHORT_SHA},repo=${REPO_NAME}
 
 substitutions:
   _REGION: 'australia-southeast2'
+  _REPO: 'manager-monitor'
 
-# Optional: publish image metadata to the build
 images:
-- gcr.io/$PROJECT_ID/manager-monitor:$SHORT_SHA
-- gcr.io/$PROJECT_ID/manager-monitor:latest
+- ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:${SHORT_SHA}
+- ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:latest
 
 timeout: '1200s'
-
 options:
   logging: CLOUD_LOGGING_ONLY

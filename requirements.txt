@@ -4,3 +4,6 @@ google-ads>=26.0.1,<28
 google-cloud-secret-manager
 google-api-python-client
 google-auth
+fastapi
+uvicorn[standard]
+google-ads

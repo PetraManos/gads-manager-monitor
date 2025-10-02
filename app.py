@@ -1,19 +1,26 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, HTTPException, Body
+import os
+from importlib.metadata import version as _pkg_version
+from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.errors import GoogleAdsException
+
+# Routers (these exist in your repo)
 from routes_checks import router as checks_router
 from routers.violations import violations_router, set_provider
 
-import os
-from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
-from importlib.metadata import version as _pkg_version
-from core.checks.base import list_codes, run_checks
+# Core helpers
+from core.checks.base import list_codes
 import core.checks.examples  # noqa: F401 ensure checks are registered
+from core_shared import (
+    norm, make_key, ymd, range_last_n_days, as_number,
+    parse_money_cell, parse_percent_cell, declared_type, expected_label
+)
 
 app = FastAPI()
 
-# Include routers
-app.include_router(checks_router)
-app.include_router(violations_router)
+# --- Mount routers ---
+app.include_router(checks_router)        # provides /checks and /checks/run
+app.include_router(violations_router)    # provides /violations/...
 
 # --- Google Ads helpers ---
 def make_client():
@@ -25,9 +32,15 @@ def make_client():
         "refresh_token": os.environ["GOOGLE_ADS_REFRESH_TOKEN"],
         "use_proto_plus": True,
     }
-    return GoogleAdsClient.load_from_dict(cfg)
+    client = GoogleAdsClient.load_from_dict(cfg)
+    # make provider available to violations routes
+    try:
+        set_provider(client)
+    except Exception:
+        pass
+    return client
 
-# --- Basic routes ---
+# --- Basic health/diag ---
 @app.get("/")
 def root():
     return {"ok": True, "service": "manager-monitor"}
@@ -79,11 +92,6 @@ def list_customers():
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Core helpers self-test ---
-from core_shared import (
-    norm, make_key, ymd, range_last_n_days, as_number,
-    parse_money_cell, parse_percent_cell, declared_type, expected_label
-)
-
 @app.get("/core/selftest")
 def core_selftest():
     return {
@@ -99,22 +107,7 @@ def core_selftest():
         "expected_label(PHRASE_ONLY)"     : expected_label("PHRASE_ONLY"),
     }
 
-# --- Checks API ---
+# --- Checks catalog passthrough (routes still under /checks via router) ---
 @app.get("/checks")
 def checks_catalog():
     return {"checks": list_codes()}
-
-@app.post("/checks/run")
-def checks_run(
-    payload: dict = Body(..., example={
-        "customers": [],
-        "checks": ["no_enabled_campaigns"]
-    })
-):
-    client = make_client()
-    customers = payload.get("customers") or [os.environ["GOOGLE_ADS_LOGIN_CUSTOMER_ID"]]
-    codes = payload.get("checks")
-    out = []
-    for cid in customers:
-        out.extend(run_checks(client, str(cid), codes))
-    return {"count": len(out), "violations": out}

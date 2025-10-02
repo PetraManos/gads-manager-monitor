@@ -1,16 +1,15 @@
 from fastapi import FastAPI, Body, HTTPException
-
-# Routers present in your tree
-from routes_checks import router as checks_router
-from routers.violations import violations_router, set_provider
-
 import os
 from importlib.metadata import version as _pkg_version
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 
+# Routers present in your tree
+from routes_checks import router as checks_router
+from routers.violations import violations_router, set_provider
+
 # Ensure example checks register themselves on import
-import core.checks.examples  # noqa: F401
+import core.checks.examples_legacy  # noqa: F401
 
 # Only symbol that exists in core/checks/base.py
 from core.checks.base import list_codes
@@ -141,8 +140,6 @@ def core_selftest():
 
 
 # --- Temporary stub to avoid old broken import of run_checks ------------------
-# Your checks API now lives in routes_checks.py (GET /checks, GET /checks/run).
-# If any clients still POST to /checks/run, keep a stub to guide them.
 @app.post("/checks/run")
 def checks_run_stub(payload: dict = Body(default={})):
     return {

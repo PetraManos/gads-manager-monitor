@@ -1,0 +1,68 @@
+steps:
+  # 1) Unit tests
+  - name: 'python:3.11-slim'
+    id: tests
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        pip install -r requirements.txt pytest
+        PYTHONPATH=. pytest -q
+
+  # 2) Build image (two tags: SHORT_SHA + latest) to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build
+    args:
+      - build
+      - -t
+      - australia-southeast2-docker.pkg.dev/$PROJECT_ID/manager-monitor/manager-monitor:$SHORT_SHA
+      - -t
+      - australia-southeast2-docker.pkg.dev/$PROJECT_ID/manager-monitor/manager-monitor:latest
+      - .
+
+  # 3) Push both tags
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-sha
+    args: ['push', 'australia-southeast2-docker.pkg.dev/$PROJECT_ID/manager-monitor/manager-monitor:$SHORT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-latest
+    args: ['push', 'australia-southeast2-docker.pkg.dev/$PROJECT_ID/manager-monitor/manager-monitor:latest']
+
+  # 4) Deploy the SHORT_SHA image to Cloud Run with NO TRAFFIC, tagged for testing
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: deploy-no-traffic
+    args:
+      - run
+      - deploy
+      - manager-monitor
+      - --image=australia-southeast2-docker.pkg.dev/$PROJECT_ID/manager-monitor/manager-monitor:$SHORT_SHA
+      - --region=australia-southeast2
+      - --allow-unauthenticated
+      - --no-traffic
+      - --tag=build-$SHORT_SHA
+      - --labels=commit=$SHORT_SHA,repo=$REPO_NAME
+
+  # 5) Smoke-test the tagged revision URL (no prod traffic touched)
+  # - name: 'gcr.io/cloud-builders/gcloud'
+  #   id: smoke-test
+  #   entrypoint: bash
+  #   args:
+  #     - -lc
+  #     - |
+  #       set -euo pipefail
+  #       SERVICE="manager-monitor"
+  #       REGION="australia-southeast2"
+  #       BASE_URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')"
+  #       HOST="${BASE_URL#https://}"
+  #       TAG_URL="https://build-$SHORT_SHA---$HOST"
+  #       echo "Probing $TAG_URL ..."
+  #       curl -sSf "$TAG_URL/ping" >/dev/null
+  #       curl -sSf "$TAG_URL/diag" >/dev/null
+  #       curl -sSf "$TAG_URL/core/selftest" >/dev/null
+  #       echo "Smoke tests passed for $TAG_URL"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'

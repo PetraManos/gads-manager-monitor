@@ -8,58 +8,33 @@ steps:
         pip install -r requirements.txt pytest
         PYTHONPATH=. pytest -q
 
-  # Compute dest image names (region-AR host)
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'set vars'
-    entrypoint: bash
-    args:
-      - -lc
-      - |
-        echo "AR_HOST=${_REGION}-docker.pkg.dev" >> $$
-        echo "DEST_SHA=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:${SHORT_SHA}" >> $$
-        echo "DEST_LATEST=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:latest" >> $$
-        cat $$ > /workspace/vars.env
-    env:
-      - 'CLOUDSDK_CORE_DISABLE_PROMPTS=1'
-
-  # 2) Build image (two tags: SHA + latest)
+  # 2) Build image
   - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: bash
-    args:
-      - -lc
-      - |
-        source /workspace/vars.env
-        docker build -t "${DEST_SHA}" -t "${DEST_LATEST}" .
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/manager-monitor:${_TAG}', '.']
 
-  # 3) Push both tags
+  # 3) Push image (required so Cloud Run can pull it)
   - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: bash
-    args:
-      - -lc
-      - |
-        source /workspace/vars.env
-        docker push "${DEST_SHA}"
-        docker push "${DEST_LATEST}"
+    args: ['push', 'gcr.io/$PROJECT_ID/manager-monitor:${_TAG}']
 
-  # 4) Deploy SHA tag to Cloud Run
+  # 4) Deploy to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - run
       - deploy
       - manager-monitor
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:${SHORT_SHA}
+      - --image=gcr.io/$PROJECT_ID/manager-monitor:${_TAG}
       - --region=${_REGION}
       - --allow-unauthenticated
-      - --labels=commit=${SHORT_SHA},repo=${REPO_NAME}
 
 substitutions:
+  _TAG: 'latest'
   _REGION: 'australia-southeast2'
-  _REPO: 'manager-monitor'
 
+# Optional: push metadata for the image
 images:
-- ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:${SHORT_SHA}
-- ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/manager-monitor:latest
+- gcr.io/$PROJECT_ID/manager-monitor:${_TAG}
 
 timeout: '1200s'
+
 options:
   logging: CLOUD_LOGGING_ONLY

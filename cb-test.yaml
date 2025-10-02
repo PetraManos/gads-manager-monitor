@@ -1,0 +1,6 @@
+steps:
+- name: 'bash'
+  entrypoint: bash
+  args: ['-lc', 'echo Hello from a clean manual build']
+options:
+  logging: CLOUD_LOGGING_ONLY

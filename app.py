@@ -1,7 +1,7 @@
-from fastapi import FastAPI
-from routes.checks_catalog import router as checks_catalog_router
-from routes.checks_exec import router as checks_exec_router
-from routes.violations import router as violations_router, set_provider
+from fastapi import FastAPI, Body
+from routes_checks import router as checks_router
+from routers.violations import violations_router, set_provider
+
 import os
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
@@ -11,14 +11,15 @@ import core.checks.examples  # noqa: F401 ensure checks are registered
 
 app = FastAPI()
 
-app.include_router(checks_catalog_router)
-app.include_router(checks_exec_router)
+# Include routers
+app.include_router(checks_router)
 app.include_router(violations_router)
 
+# --- Google Ads helpers ---
 def make_client():
     cfg = {
         "developer_token": os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"],
-        "login_customer_id": os.environ["GOOGLE_ADS_LOGIN_CUSTOMER_ID"],  # digits only
+        "login_customer_id": os.environ["GOOGLE_ADS_LOGIN_CUSTOMER_ID"],
         "client_id": os.environ["GOOGLE_ADS_OAUTH_CLIENT_ID"],
         "client_secret": os.environ["GOOGLE_ADS_OAUTH_CLIENT_SECRET"],
         "refresh_token": os.environ["GOOGLE_ADS_REFRESH_TOKEN"],
@@ -26,6 +27,7 @@ def make_client():
     }
     return GoogleAdsClient.load_from_dict(cfg)
 
+# --- Basic routes ---
 @app.get("/")
 def root():
     return {"ok": True, "service": "manager-monitor"}
@@ -76,7 +78,7 @@ def list_customers():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- core helpers self-test (doesn't touch Google Ads) ---
+# --- Core helpers self-test ---
 from core_shared import (
     norm, make_key, ymd, range_last_n_days, as_number,
     parse_money_cell, parse_percent_cell, declared_type, expected_label
@@ -92,13 +94,11 @@ def core_selftest():
         "as_number_5pct"           : as_number("5%"),
         "as_number_0.05"           : as_number("0.05"),
         "money_$1,234.56"          : parse_money_cell("$1,234.56"),
-        "percent_'0.5'"            : parse_percent_cell("0.5"),   # returns 50 (percent)
+        "percent_'0.5'"            : parse_percent_cell("0.5"),
         "declared_type('Brand - Phrase')" : declared_type("Brand - Phrase"),
         "expected_label(PHRASE_ONLY)"     : expected_label("PHRASE_ONLY"),
     }
 
-
-from fastapi import Body
 # --- Checks API ---
 @app.get("/checks")
 def checks_catalog():
@@ -107,11 +107,11 @@ def checks_catalog():
 @app.post("/checks/run")
 def checks_run(
     payload: dict = Body(..., example={
-        "customers": [],                       # optional; defaults to LOGIN_CUSTOMER_ID
-        "checks": ["no_enabled_campaigns"]     # which checks to run
+        "customers": [],
+        "checks": ["no_enabled_campaigns"]
     })
 ):
-    client = make_ads_client()
+    client = make_client()
     customers = payload.get("customers") or [os.environ["GOOGLE_ADS_LOGIN_CUSTOMER_ID"]]
     codes = payload.get("checks")
     out = []

@@ -1,31 +1,25 @@
 from fastapi import FastAPI, Body, HTTPException
-import os
-from importlib.metadata import version as _pkg_version
-from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
 
 # Routers present in your tree
 from routes_checks import router as checks_router
 from routers.violations import violations_router, set_provider
 
+import os
+from importlib.metadata import version as _pkg_version
+from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.errors import GoogleAdsException
+
 # Ensure example checks register themselves on import
-import core.checks.examples_legacy  # noqa: F401
+import core.checks.examples  # noqa: F401
 
 # Only symbol that exists in core/checks/base.py
 from core.checks.base import list_codes
 
-# Core shared utilities used by /core/selftest
-from core_shared import (
-    norm,
-    make_key,
-    ymd,
-    range_last_n_days,
-    as_number,
-    parse_money_cell,
-    parse_percent_cell,
-    declared_type,
-    expected_label,
-)
+# Core utilities from your core/ package (no core_shared.py)
+from core.text import norm, make_key
+from core.names import declared_type, expected_label
+from core.dates import ymd, range_last_n_days
+from core.numeric import as_number, parse_money_cell, parse_percent_cell
 
 app = FastAPI()
 
@@ -127,8 +121,8 @@ def core_selftest():
     return {
         "norm(' Foo\\u00A0  Bar  ')"          : norm(" Foo\u00A0  Bar  "),
         "make_key"                            : make_key("Acme  Co", " CODE-123 "),
-        "ymd_ADELAIDE"                        : ymd(tz="Australia/Adelaide"),
-        "range_7_days_ADELAIDE"               : range_last_n_days(7, tz="Australia/Adelaide"),
+        "ymd"                                 : ymd(),
+        "range_7_days"                        : range_last_n_days(7),
         "as_number_5pct"                      : as_number("5%"),
         "as_number_0.05"                      : as_number("0.05"),
         "money_$1,234.56"                     : parse_money_cell("$1,234.56"),
@@ -140,6 +134,8 @@ def core_selftest():
 
 
 # --- Temporary stub to avoid old broken import of run_checks ------------------
+# Your checks API now lives in routes_checks.py (GET /checks, GET /checks/run).
+# If any clients still POST to /checks/run, keep a stub to guide them.
 @app.post("/checks/run")
 def checks_run_stub(payload: dict = Body(default={})):
     return {

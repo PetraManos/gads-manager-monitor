@@ -1,95 +1,74 @@
+# core/dates.py
 from __future__ import annotations
 from datetime import datetime, date, timedelta, timezone
 
+# Prefer system tzdata; fall back to fixed ACST/ACDT-like offset if unavailable.
 try:
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # Python 3.9+
-except Exception:  # environments without tzdata
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:
     ZoneInfo = None  # type: ignore
-    class ZoneInfoNotFoundError(Exception):
-        ...
 
-# Adelaide fallback if tzdata missing (no DST in fallback)
-_DEF_FIXED_OFFSET = timezone(timedelta(hours=9, minutes=30))
+# Default timezone to match the script's Adelaide setting
+_DEFAULT_TZ_NAME = "Australia/Adelaide"
+_FALLBACK_TZ = timezone(timedelta(hours=9, minutes=30))  # ACST fallback (no DST)
 
-def _resolve_adelaide_tz():
-    try:
-        if ZoneInfo is not None:
-            return ZoneInfo("Australia/Adelaide")
-    except ZoneInfoNotFoundError:
-        pass
-    except Exception:
-        pass
-    return _DEF_FIXED_OFFSET
 
-_TZ = _resolve_adelaide_tz()
-
-def set_tz(tz: timezone) -> None:
-    """Override the module timezone (useful for tests)."""
-    global _TZ
-    _TZ = tz
-
-def now_tz() -> datetime:
-    return datetime.now(tz=_TZ)
-
-def now() -> datetime:
-    """Alias expected by core/__init__.py; timezone-aware Adelaide-now (or fallback)."""
-    return now_tz()
-
-def ymd(dt: datetime | date | None = None) -> str:
-    """Return YYYY-MM-DD from a datetime/date (defaults to now())."""
-    if dt is None:
-        dt = now_tz()
-    if isinstance(dt, datetime):
-        dt = dt.date()
-    return dt.strftime("%Y-%m-%d")
-
-def normalize_date(value: datetime | date | str | None) -> str:
-    """
-    Best-effort normalizer to YYYY-MM-DD.
-    Accepts datetime/date or common string formats:
-      - YYYY-MM-DD
-      - DD/MM/YYYY
-      - MM/DD/YYYY
-      - YYYY/MM/DD
-      - YYYY.MM.DD
-    Falls back to today's date if value is None/empty.
-    """
-    if value is None or (isinstance(value, str) and value.strip() == ""):
-        return ymd()
-
-    if isinstance(value, (datetime, date)):
-        return ymd(value)
-
-    s = value.strip()
-    # Fast path: ISO-like YYYY-MM-DD
-    try:
-        return datetime.fromisoformat(s).date().strftime("%Y-%m-%d")
-    except Exception:
-        pass
-
-    # Try a handful of explicit formats
-    fmts = ["%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%Y.%m.%d"]
-    for f in fmts:
+def _tz():
+    """Resolve Australia/Adelaide if tzdata is present; otherwise use a fixed offset."""
+    if ZoneInfo is not None:
         try:
-            return datetime.strptime(s, f).date().strftime("%Y-%m-%d")
+            return ZoneInfo(_DEFAULT_TZ_NAME)
         except Exception:
-            continue
+            pass
+    return _FALLBACK_TZ
 
-    # If all parsing fails, return as-is if it looks like YYYY-MM-DD, else today.
-    # (Keeps behavior predictable without adding heavy deps.)
-    try:
-        # len check to avoid ValueError from slicing weird strings
-        if len(s) >= 10:
-            datetime.strptime(s[:10], "%Y-%m-%d")
-            return s[:10]
-    except Exception:
-        pass
 
-    return ymd()
+def _at_midnight_local(dt: datetime) -> datetime:
+    """Truncate a datetime to midnight in local TZ."""
+    local = dt.astimezone(_tz())
+    return local.replace(hour=0, minute=0, second=0, microsecond=0)
 
-def range_last_n_days(n: int) -> tuple[str, str]:
-    end = now_tz().date()
-    start = end - timedelta(days=n)
-    return (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
 
-__all__ = ["set_tz", "now_tz", "now", "ymd", "normalize_date", "range_last_n_days"]
+def _yyyymmdd(d: datetime | date) -> str:
+    if isinstance(d, datetime):
+        d = d.date()
+    return f"{d.year:04d}{d.month:02d}{d.day:02d}"
+
+
+def normalize_date_only(d: datetime | date) -> datetime:
+    """
+    GS parity of normalizeDate_(d): return the same calendar date at 00:00:00 in local TZ.
+    """
+    if isinstance(d, datetime):
+        return _at_midnight_local(d)
+    # date -> interpret as local TZ midnight
+    return datetime(d.year, d.month, d.day, tzinfo=_tz())
+
+
+def ymd(d: datetime | date | None = None) -> str:
+    """
+    GS parity of ymd(d): Utilities.formatDate(d, tz, 'yyyyMMdd').
+    If d is None, use 'today' in local TZ.
+    """
+    if d is None:
+        d = _at_midnight_local(datetime.now(tz=_tz()))
+    elif isinstance(d, datetime):
+        d = _at_midnight_local(d)
+    else:  # date
+        d = datetime(d.year, d.month, d.day, tzinfo=_tz())
+    return _yyyymmdd(d)
+
+
+def range_last_n_days(n: int) -> str:
+    """
+    GS parity of rangeLastNDays(n): inclusive 'yyyyMMdd,yyyyMMdd' in local TZ.
+    start = today - (n-1); end = today.
+    """
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    end = _at_midnight_local(datetime.now(tz=_tz()))
+    start = end - timedelta(days=n - 1)
+    return f"{_yyyymmdd(start)},{_yyyymmdd(end)}"
+
+
+__all__ = ["ymd", "range_last_n_days", "normalize_date_only"]

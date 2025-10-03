@@ -1,0 +1,6 @@
+# test/dev-only deps
+pytest
+httpx
+# if you're running example checks or importing FastAPI during tests:
+fastapi
+google-ads

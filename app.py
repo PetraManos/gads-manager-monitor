@@ -16,7 +16,7 @@ import core.checks.examples  # noqa: F401
 from core.checks.base import list_codes
 
 # Core utilities from your core/ package (no core_shared.py)
-from core.text import norm, make_key
+from core.string_utils import norm, make_key
 from core.names import declared_type, expected_label
 from core.dates import ymd, range_last_n_days
 from core.numeric import as_number, parse_money_cell, parse_percent_cell

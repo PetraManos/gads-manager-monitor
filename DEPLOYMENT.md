@@ -4,7 +4,7 @@
 - You must be on the correct branch (or `main`) → `git status`
 - All tests should pass locally → `pip install -r requirements.txt && PYTHONPATH=. pytest -q`
 
-## 1. Build & Push
+## 1. Build
 Build and push the image to Google Container Registry:
 gcloud builds submit --config=cloudbuild.yaml .
 

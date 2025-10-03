@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Callable
-from core.text import collapse_one_line
+from core.string_utils import collapse_one_line
 
 @dataclass
 class RunLogCtx:

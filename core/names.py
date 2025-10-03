@@ -1,62 +1,100 @@
+# core/names.py
+from __future__ import annotations
 import re
 from typing import Optional
+from core.string_utils import norm  # single source of truth
 
-# --- helpers -----------------------------------------------------------------
+_SEP_RX = re.compile(r"[-_/+&]")              # normalize separators to spaces
+_WORD_RX = re.compile(r"[a-z]+")              # letter tokens
+_PE_RX   = re.compile(r"\b(p\s*[/+&]\s*e|e\s*[/+&]\s*p)\b", re.I)
 
-def _norm(s: str) -> str:
-    """Lowercase, normalize NBSPs, collapse whitespace."""
-    t = (s or "").replace("\xa0", " ").replace("\u00a0", " ").lower()
-    return " ".join(t.split())
+# GS-parity: require "... match" with exact|phrase|broad.
+# Use alphabet-only boundaries so underscores/hyphens count as separators.
+_MATCH_TOKEN_RX = re.compile(
+    r"(?<![a-z])(?:exact|phrase|broad)(?![a-z])[\s\-_]*"
+    r"(?<![a-z])match(?![a-z])",
+    re.I,
+)
 
-def _tokens(s: str) -> set[str]:
-    """Word tokens (letters only) after normalizing common separators."""
-    s = _norm(s)
-    # Turn separators into spaces so "Brand - Phrase", "Phrase/Exact" tokenize well
-    s = re.sub(r"[-_/+&]", " ", s)
-    return set(re.findall(r"[a-z]+", s))
 
-# --- public API ---------------------------------------------------------------
+def _tokens_from_normalized(n: str) -> set[str]:
+    s = _SEP_RX.sub(" ", n)
+    return set(_WORD_RX.findall(s))
 
+class CampaignName:
+    """
+    Encapsulates campaign naming classification.
+
+    Example:
+        campaign_name = CampaignName("Brand - Phrase")
+        campaign_name.declared_type        -> "PHRASE_ONLY"
+        campaign_name.expected_label       -> "PHRASE"
+        campaign_name.has_match_type_token -> True
+        campaign_name.is_dynamic_search    -> False
+        campaign_name.is_branded_search    -> True
+    """
+    __slots__ = ("raw", "n", "_toks")
+
+    def __init__(self, raw: str):
+        self.raw = raw or ""
+        self.n = norm(self.raw)              # lowercase, NBSP→space, collapse ws
+        self._toks = _tokens_from_normalized(self.n)
+
+    @property
+    def tokens(self) -> set[str]:
+        return self._toks
+
+    @property
+    def has_match_type_token(self) -> bool:
+        return _MATCH_TOKEN_RX.search(self.n) is not None
+
+    @property
+    def declared_type(self) -> Optional[str]:
+        toks = self._toks
+        # Shorthand like "p/e" or both tokens present
+        if _PE_RX.search(self.n) or ({"phrase", "exact"} <= toks):
+            return "PHRASE_AND_EXACT"
+        if "phrase" in toks and not {"exact", "broad"} & toks:
+            return "PHRASE_ONLY"
+        if "exact" in toks and not {"phrase", "broad"} & toks:
+            return "EXACT_ONLY"
+        if "broad" in toks and not {"phrase", "exact"} & toks:
+            return "BROAD_ONLY"
+        return None
+
+    @property
+    def expected_label(self) -> str:
+        mapping = {
+            "PHRASE_ONLY": "PHRASE",
+            "EXACT_ONLY": "EXACT",
+            "BROAD_ONLY": "BROAD",
+            "PHRASE_AND_EXACT": "PHRASE or EXACT",
+        }
+        return mapping.get(self.declared_type or "", "")
+
+    @property
+    def is_dynamic_search(self) -> bool:
+        # matches 'dynamic', 'dynamicsearch', or 'dsa'
+        return bool(
+            "dynamic" in self._toks
+            or "dynamicsearch" in self._toks
+            or re.search(r"\bdsa\b", self.n)
+        )
+
+    @property
+    def is_branded_search(self) -> bool:
+        # treat both "brand" and "branded" as branded
+        return re.search(r"\bbrand(?:ed)?\b", self.n) is not None
+
+
+# ---- Optional thin wrappers (safe to remove after migrating call sites) ----
 def has_match_type_token(name: str) -> bool:
-    """True if the string mentions phrase/exact/broad (or P/E shorthand)."""
-    n = _norm(name)
-    toks = _tokens(n)
-    if {"phrase", "exact"} & toks or "broad" in toks:
-        return True
-    # Allow shorthand like "p/e" or "e/p"
-    if re.search(r"\bp\s*/\s*e\b|\be\s*/\s*p\b", n):
-        return True
-    return False
+    return CampaignName(name).has_match_type_token
 
 def declared_type(name: str) -> Optional[str]:
-    """
-    Map a human label to an internal declared type:
-      - 'Brand - Phrase' -> 'PHRASE_ONLY'
-      - 'Brand - Exact'  -> 'EXACT_ONLY'
-      - 'Brand - Broad'  -> 'BROAD_ONLY'
-      - 'P/E' or 'Phrase & Exact' -> 'PHRASE_AND_EXACT'
-      - otherwise -> None
-    """
-    n = _norm(name)
-    toks = _tokens(n)
-
-    # Shorthand like "p/e" or "e/p"
-    if re.search(r"\bp\s*/\s*e\b|\be\s*/\s*p\b", n) or ({"phrase", "exact"} <= toks):
-        return "PHRASE_AND_EXACT"
-
-    if "phrase" in toks:
-        return "PHRASE_ONLY"
-    if "exact" in toks:
-        return "EXACT_ONLY"
-    if "broad" in toks:
-        return "BROAD_ONLY"
-
-    return None
+    return CampaignName(name).declared_type
 
 def expected_label(declared: Optional[str]) -> str:
-    """
-    Human-facing label for a declared type, used in UI/reports/tests.
-    """
     mapping = {
         "PHRASE_ONLY": "PHRASE",
         "EXACT_ONLY": "EXACT",
@@ -66,19 +104,15 @@ def expected_label(declared: Optional[str]) -> str:
     return mapping.get(declared or "", "")
 
 def is_dynamic_search_name(name: str) -> bool:
-    """
-    True if the name indicates Dynamic Search (e.g., contains 'dynamic' or 'dsa').
-    """
-    toks = _tokens(name)
-    return "dynamic" in toks or "dsa" in toks or "dynamicsearch" in toks
+    return CampaignName(name).is_dynamic_search
 
 def is_branded_search_name(name: str) -> bool:
-    """
-    True if the name looks like a branded segment (contains 'brand' token).
-    """
-    return "brand" in _tokens(name)
+    return CampaignName(name).is_branded_search
+
 
 __all__ = [
+    "CampaignName",
+    # wrappers:
     "has_match_type_token",
     "declared_type",
     "expected_label",

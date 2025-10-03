@@ -1,6 +1,6 @@
+# core/string_utils.py
 from __future__ import annotations
 import re
-from typing import Any
 
 _NBSP = "\u00A0"
 _WS = re.compile(r"\s+")
@@ -21,14 +21,28 @@ def norm(s: object) -> str:
     return text
 
 def collapse_one_line(s: str) -> str:
-    """Collapse all whitespace to single spaces and trim."""
+    """Collapse all whitespace to single spaces and trim (case-preserving)."""
     return re.sub(r"\s+", " ", s or "").strip()
 
 def has_word(s: str, word: str) -> bool:
-    """Whole-word match (GS parity): uses \b word boundaries."""
-    s_l = (s or "").lower()
+    """
+    Whole-word match (case-insensitive), with custom boundaries where
+    hyphen/underscore are treated as part of a word (so 'red-blue' does NOT match 'blue').
+    """
+    text = (s or "").lower()
     w = re.escape((word or "").lower())
-    return re.search(rf"\b{w}\b", s_l) is not None
+    # Word chars include letters/digits/underscore/hyphen. Boundaries are the inverse of that set.
+    pattern = rf"(?<![A-Za-z0-9_-]){w}(?![A-Za-z0-9_-])"
+    return re.search(pattern, text) is not None
+
+def has_match_type_token(name: object) -> bool:
+    """
+    Detect 'exact match' / 'phrase match' / 'broad match' with optional spaces/hyphens/underscores
+    between the words, case-insensitive. Examples: 'Exact Match', 'phrase-match', 'BROAD_match'.
+    """
+    s = ("" if name is None else str(name)).lower()
+    pattern = r"(?<![A-Za-z0-9_-])(?:exact|phrase|broad)[\s\-_]*match(?![A-Za-z0-9_-])"
+    return re.search(pattern, s) is not None
 
 # ---- helpers used elsewhere ----
 def norm_collapse(s: object) -> str:
@@ -38,11 +52,13 @@ def norm_collapse(s: object) -> str:
 def make_key(*parts: object) -> str:
     """Stable pipe-delimited key based on normalized, collapsed parts."""
     return "|".join(norm_collapse(p) for p in parts)
+# -------------------------------
 
 __all__ = [
     "norm",
     "collapse_one_line",
     "has_word",
+    "has_match_type_token",
     "norm_collapse",
     "make_key",
 ]
